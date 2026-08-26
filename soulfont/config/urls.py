@@ -14,6 +14,8 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+import os
+
 from django.contrib import admin #type: ignore
 from django.urls import path, include #type: ignore
 from django.views.generic import RedirectView #type: ignore
@@ -33,6 +35,9 @@ urlpatterns = [
     path('learning/', views.learning, name='learning'),
 ]
 
-if settings.DEBUG:
+# Media (the generated TTFs, profile images) also has nothing in front of it in the
+# desktop build. django.views.static.serve is not for a public deployment, but the app
+# binds 127.0.0.1 only and serves one local user, and it is hardened against traversal.
+if settings.DEBUG or os.environ.get('SOULFONT_APP') == '1':
     urlpatterns += static(settings.MEDIA_URL,
                           document_root=settings.MEDIA_ROOT)

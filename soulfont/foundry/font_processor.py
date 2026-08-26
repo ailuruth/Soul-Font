@@ -4,9 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from PIL import Image, ImageChops
 from scipy import ndimage
-from pdf2image import convert_from_path  # type: ignore
+import pypdfium2 as pdfium  # type: ignore
 
-from foundry.inference import main as inference_main
 from foundry.char_layout import (
     ALLOWED_TEMPLATE_CELL_COUNTS,
     LEGACY_LAYOUT,
@@ -33,7 +32,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # glance what is generated and what is source. Was three separate top-level directories
 # (FONT/, style/, configs/) plus static/outputs/, which put working data inside the
 # static assets folder.
-WORKDIR = os.path.join(PROJECT_ROOT, 'workdir')
+from apppaths import DATA_ROOT  # noqa: E402
+
+WORKDIR = os.path.join(DATA_ROOT, 'workdir')
 
 # Default target set: KS X 1001 common-use 2,350 Hangul (much faster than the full
 # 11,170 and covers everyday Korean). Swap to korean11172.txt for full coverage.
@@ -194,7 +195,7 @@ def _even_stroke_width(gray, strength=STROKE_EVENNESS):
     return _render_field(reach - radius)
 
 
-def prepare_trace_images(src_dir, dst_dir, target_size=TRACE_IMAGE_SIZE):
+def prepare_trace_images(src_dir, dst_dir, target_size=TRACE_IMAGE_SIZE, progress=None):
     """Clean up glyph rasters so the vectorizer traces ink rather than generator noise.
 
     The model output stays untouched in ``src_dir``. Each glyph gets its pinholes closed
@@ -227,7 +228,13 @@ def prepare_trace_images(src_dir, dst_dir, target_size=TRACE_IMAGE_SIZE):
     names = [f for f in os.listdir(src_dir) if f.lower().endswith('.png')]
     # A full Hangul set is 11k images and the filters release the GIL, so threads pay off.
     with ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 1))) as pool:
-        list(pool.map(prepare, names))
+        # Consumed one at a time rather than list()ed, so the caller can report progress
+        # through a phase that is thousands of glyphs long.
+        done = 0
+        for _ in pool.map(prepare, names):
+            done += 1
+            if progress and (done % 250 == 0 or done == len(names)):
+                progress(done, len(names))
     harmonize_stroke_weight(dst_dir)
     return dst_dir
 
@@ -572,8 +579,30 @@ class FontStyleProcessor:
             if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                 os.remove(os.path.join(self.output_dir, fname))
 
+    @staticmethod
+    def _render_pdf(pdf_path, dpi=300):
+        """Every page of a PDF as PIL images at `dpi`.
+
+        pdfium rather than pdf2image/Poppler. Poppler is a separate binary the user has
+        to install first — it was the single most common setup failure — and it is GPL,
+        which is a problem to put inside a desktop installer that is sold. pdfium ships
+        in the wheel under BSD-3-Clause, so there is nothing to install and nothing
+        copyleft to redistribute.
+
+        It renders a hair wider than Poppler at the same dpi (2482px vs 2481px on A4 at
+        300) and antialiases slightly heavier. Neither matters here: crop.py finds the
+        printed border and divides that, so it keys off the drawn frame rather than the
+        page size, and clean_images thresholds at 200 which is well clear of the edge
+        difference.
+        """
+        doc = pdfium.PdfDocument(pdf_path)
+        try:
+            return [doc[i].render(scale=dpi / 72.0).to_pil() for i in range(len(doc))]
+        finally:
+            doc.close()
+
     def convert_pdf_to_images(self):
-        images = convert_from_path(self.pdf_path, dpi=300)
+        images = self._render_pdf(self.pdf_path, dpi=300)
         for i, img in enumerate(images):
             fname = (f"{self.output_dir}/{self.base_name}_p{i+1}.png"
                      if len(images) > 1 else f"{self.output_dir}/{self.base_name}.png")
@@ -698,17 +727,23 @@ class FontStyleProcessor:
         with open(self.yaml_path, 'w', encoding='utf-8') as f:
             yaml.dump(cfg, f, allow_unicode=True)
 
-    def run_inference(self):
+    def run_inference(self, progress=None):
         target_chars = self._load_target_chars()
         os.makedirs(self.save_dir, exist_ok=True)
         self.generate_yaml(target_chars)
         print(f"[INFO] Generating {len(target_chars)} Korean characters")
-        inference_main(
+        # Imported here, not at module scope: foundry.generate picks between the ONNX and
+        # torch backends, and importing the torch one eagerly would pull 312 MB of torch
+        # into a packaged build that ships neither it nor the .pth.
+        from foundry.generate import run as generate_glyphs
+
+        generate_glyphs(
             self.yaml_path,
             self.checkpoint,
             self.save_dir,
             device_name=self.device_name,
             use_amp=self.use_amp,
+            progress=progress,
         )
         print("[INFO] All Korean characters generated successfully.")
 
@@ -740,10 +775,10 @@ class FontStyleProcessor:
         if traced_glyphs:
             print(f"[INFO] Embedded {len(traced_glyphs)} traced ENG/special glyphs")
 
-    def run_all(self):
+    def run_all(self, progress=None):
         self.reset_intermediates()
         self.convert_pdf_to_images()
         self.trim_and_save_images()
         self.clean_images()
-        self.run_inference()
+        self.run_inference(progress=progress)
         self.copy_traced_glyphs()

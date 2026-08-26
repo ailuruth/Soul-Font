@@ -273,7 +273,7 @@ def _notdef_glyph():
     return pen.glyph()
 
 
-def build_ttf(glyph_dir, out_path, font_name='SoulFont', fit_scales=None):
+def build_ttf(glyph_dir, out_path, font_name='SoulFont', fit_scales=None, progress=None):
     """Vectorize every glyph PNG in glyph_dir and write a TTF.
 
     Advances are placeholders: refine_metrics fits the real spacing afterwards, the same
@@ -289,7 +289,9 @@ def build_ttf(glyph_dir, out_path, font_name='SoulFont', fit_scales=None):
     cmap = {}
     blank = []
 
-    for fname in files:
+    for done, fname in enumerate(files, 1):
+        if progress and (done % 250 == 0 or done == len(files)):
+            progress(done, len(files))
         cp = _codepoint_of(fname)
         if cp is None:
             continue

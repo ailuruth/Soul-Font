@@ -1,0 +1,123 @@
+name: Desktop build
+
+# PyInstaller cannot cross-compile, so the .app is built on a macOS runner and the .exe on
+# a Windows one. This workflow is the only place the Windows build actually happens —
+# nothing in the repo can produce it from a Mac.
+#
+# Neither the .pth checkpoint (183 MB) nor the exported onnx/ (192 MB) is in git, so each
+# job downloads the upstream checkpoint and exports the graphs itself. That makes the
+# model in a build traceable to a specific upstream release rather than to a blob someone
+# once committed.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write        # required to attach files to a release
+
+env:
+  CHECKPOINT_URL: https://github.com/clovaai/dmfont/releases/download/v1.0.0/korean-handwriting.pth
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            artifact: SoulFont-macos
+            bundle: dist/Soul Font.app
+            package: SoulFont-macos.dmg
+          - os: windows-latest
+            artifact: SoulFont-windows
+            bundle: dist/SoulFont
+            package: SoulFont-windows.zip
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pywebview waitress whitenoise onnxruntime pyinstaller
+
+      # torch is needed to export the graphs, but is excluded from the bundle itself.
+      - name: Install torch (export only)
+        run: pip install torch==2.7.1 torchvision==0.22.1
+
+      - name: Cache the checkpoint
+        id: ckpt
+        uses: actions/cache@v4
+        with:
+          path: soulfont/checkpoints
+          key: dmfont-korean-handwriting-v1.0.0
+
+      - name: Download the checkpoint
+        if: steps.ckpt.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p soulfont/checkpoints
+          curl -L --fail -o soulfont/checkpoints/korean-handwriting.pth "$CHECKPOINT_URL"
+
+      - name: Export ONNX
+        working-directory: soulfont
+        run: python scripts/export_onnx.py
+
+      - name: Verify ONNX matches PyTorch
+        working-directory: soulfont
+        run: python scripts/verify_onnx.py
+
+      - name: Collect static files
+        working-directory: soulfont
+        env:
+          SOULFONT_APP: '1'
+          SOULFONT_DATA_DIR: ${{ runner.temp }}/soulfont-data
+        run: python manage.py collectstatic --noinput
+
+      - name: Build
+        run: pyinstaller packaging/soulfont.spec --noconfirm
+
+      - name: Smoke test the bundle
+        shell: bash
+        run: python packaging/smoke_test.py "${{ matrix.bundle }}"
+
+      # A .app is 161 symlinks and an executable bit, and actions/upload-artifact zips
+      # without preserving either — the download would not launch. A DMG is the format
+      # macOS distributes in anyway, and hdiutil keeps the bundle intact.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p staging
+          cp -R "dist/Soul Font.app" staging/
+          ln -s /Applications staging/Applications
+          hdiutil create -volname "Soul Font" -srcfolder staging \
+            -ov -format UDZO "SoulFont-macos.dmg"
+
+      # Windows has no permission bits to lose, so a plain zip is enough.
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/SoulFont/* -DestinationPath SoulFont-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.package }}
+          if-no-files-found: error
+
+      # Artifacts expire and need a GitHub login, so they are for checking a build, not
+      # for giving anyone the app. A tagged build also attaches to the Release, which is
+      # the page people can actually download from.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.package }}
+          fail_on_unmatched_files: true

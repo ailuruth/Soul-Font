@@ -11,7 +11,10 @@
     <p class="gen-stage" id="genStage">{{ job.status_stage|default:"Queued" }}</p>
     <div class="gen-bar"><div class="gen-bar-fill" id="genFill"
          style="width: {{ job.status_percent }}%"></div></div>
-    <p class="hint">{{ busy_note|default:"About two minutes. You can leave and come back." }}</p>
+    <p class="hint">{{ busy_note|default:build_estimate }}</p>
+    <p class="hint">Every one of the 11,172 Korean syllables is drawn, so this takes a while.
+       You can close Soul Font and come back — but the build stops when you do, and starts
+       over next time.</p>
   </div>
   <script>
     (function () {

@@ -19,6 +19,13 @@
         <form id="fontForm" action="{% url 'learning' %}" method="post" enctype="multipart/form-data">
           {% csrf_token %}
 
+          {% if upload_error %}
+            <div class="gen-box gen-failed" role="alert">
+              <h3>That file cannot be used</h3>
+              <p class="gen-stage">{{ upload_error }}</p>
+            </div>
+          {% endif %}
+
           <ol class="steps">
             <li class="step-box">
               <h3><span class="step-n">1</span>Download the template</h3>
@@ -50,21 +57,34 @@
 
               <details class="tip">
                 <summary class="tip-title">Advanced</summary>
+                {% if acceleration.available %}
                 <div class="field-col">
                   <span class="fc-label">Compute</span>
                   <div class="speed" id="computeGroup">
                     <label class="sel">
                       <input type="radio" name="accelerator" value="auto" checked>
-                      <span class="name">Automatic</span>
-                      <div class="desc">Uses the GPU when there is one. About 4x faster, with the same glyphs.</div>
+                      <span class="name">{{ acceleration.label }}</span>
+                      <div class="desc">{{ acceleration.detail }}</div>
                     </label>
                     <label>
                       <input type="radio" name="accelerator" value="cpu">
                       <span class="name">CPU only</span>
-                      <div class="desc">Always uses the CPU.</div>
+                      <div class="desc">Slower, but leaves the GPU free for other things.</div>
                     </label>
                   </div>
                 </div>
+                {% else %}
+                {% comment %}
+                  No accelerator here, so there is nothing to choose. Showing the picker
+                  anyway meant promising a speedup to people whose machine cannot do it,
+                  and offering a setting that changed nothing. {# #} is single-line only,
+                  which is why this is a comment tag.
+                {% endcomment %}
+                <div class="field-col">
+                  <span class="fc-label">Compute</span>
+                  <p class="hint">{{ acceleration.detail }}</p>
+                </div>
+                {% endif %}
               </details>
             </li>
           </ol>

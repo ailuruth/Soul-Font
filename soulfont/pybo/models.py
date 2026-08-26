@@ -116,3 +116,25 @@ class Template(models.Model):
 
     def __str__(self):
         return self.name
+
+
+def reclaim_interrupted_builds():
+    """Fail any build that was still running when the app last stopped.
+
+    A build runs on a background thread, so quitting the app kills it — but the row in
+    the database still says "running". Nothing ever moves it, so on the next launch the
+    font shows a progress bar that will never fill and offers no way out: not done, not
+    failed, no Try again button. On a desktop app, where quitting mid-task is ordinary,
+    that is a font the user can neither finish nor retry.
+
+    Called at startup, before the UI is reachable. Returns how many rows were reclaimed.
+    """
+    stuck = UserData.objects.filter(
+        status__in=(UserData.STATUS_PENDING, UserData.STATUS_RUNNING)
+    )
+    return stuck.update(
+        status=UserData.STATUS_FAILED,
+        status_error="This font was still building when Soul Font last closed, so it "
+                     "did not finish. Your template is still here — press Try again to "
+                     "build it from the start.",
+    )

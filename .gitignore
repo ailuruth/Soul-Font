@@ -71,3 +71,12 @@ soulfont/workdir/
 .idea/
 .vscode/
 *.swp
+
+# ---- Desktop build ----
+# onnx/ is 192 MB of exported model; scripts/export_onnx.py regenerates it from the
+# checkpoint, and CI does exactly that, so it is not worth carrying in git.
+onnx/
+dist/
+build/
+*.spec.bak
+soulfont/staticfiles/

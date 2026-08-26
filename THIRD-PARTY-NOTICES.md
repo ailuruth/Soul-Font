@@ -96,6 +96,29 @@ Copyright OpenJS Foundation and other contributors. MIT. https://jquery.com
 A copy of `lib/sfnt/os2.js` from svg2ttf. Copyright (c) 2013-2014 Vitaly Puzrin.
 MIT. https://github.com/fontello/svg2ttf
 
+### Desktop build
+
+Installed from `requirements-desktop.txt`; these ship inside the packaged app.
+
+| Package | Licence | Role |
+|---|---|---|
+| pywebview | BSD-3-Clause | window shell around the OS webview |
+| waitress | ZPL-2.1 | WSGI server |
+| whitenoise | MIT | serves static files from inside the app |
+| onnxruntime | MIT | runs the exported model in place of PyTorch |
+| pyinstaller | GPL-2.0 **with a bundling exception** | build tool |
+
+PyInstaller's licence is the one to understand. It is GPL-2.0 with an explicit exception
+permitting the bundling of applications under any licence, so using it to package Soul
+Font does not make Soul Font GPL. What must not happen is redistributing a modified
+PyInstaller itself. The bootloader shipped inside the bundle is covered by that same
+exception.
+
+The exported model in `onnx/` carries whatever terms the DM-Font checkpoint it was
+converted from carries — converting a format does not change the licence of the weights.
+See **The pretrained checkpoint** above; the UhBee question applies to the desktop build
+exactly as it does to the web app.
+
 ### Node dependencies of `soulfont/foundry/generateTTF.js`
 
 Installed from `soulfont/package.json`; not vendored in git, but they ship with
@@ -120,10 +143,15 @@ any deployment. All permissive, all requiring notice retention:
 Installed from `requirements.txt`; not vendored in git. Django (BSD-3-Clause),
 PyTorch (BSD-3-Clause), NumPy (BSD-3-Clause), Pillow (MIT-CMU), fontTools (MIT),
 scikit-image (BSD-3-Clause), SciPy (BSD-3-Clause), matplotlib (PSF-based),
-pdf2image (MIT), h5py (BSD-3-Clause), PyYAML (MIT), sconf (MIT), fire (Apache-2.0),
+h5py (BSD-3-Clause), PyYAML (MIT), sconf (MIT), fire (Apache-2.0),
 tqdm (MPL-2.0 / MIT), tensorboardX (MIT). All permit commercial use.
 
-Poppler, the system dependency behind pdf2image, is GPL-2.0/GPL-3.0. Soul Font
-invokes it as a separate executable rather than linking it, which is the ordinary
-arm's-length use and does not place Soul Font under the GPL. Do not link Poppler
-into the application or bundle it as a library without advice.
+**pypdfium2 / PDFium** — `pypdfium2==5.13.0`, BSD-3-Clause and Apache-2.0.
+Renders the uploaded PDF. The wheel bundles `libpdfium` itself (`.dylib` on macOS,
+`.dll` on Windows), so there is no system package to install and nothing copyleft
+to redistribute — which is what makes a packaged desktop build possible.
+
+This replaced pdf2image/Poppler. Poppler is GPL-2.0/GPL-3.0; invoking it as a
+separate executable was arm's-length and fine, but shipping it inside a paid
+installer would have meant distributing GPL binaries under GPL terms. If you ever
+reintroduce it, that distinction is the one that matters.

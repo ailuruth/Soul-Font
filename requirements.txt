@@ -4,10 +4,15 @@
 # Python 3.9. Several of these are the last releases to support 3.9, so do not
 # relax the pins without also moving to a newer interpreter.
 #
-# System dependency: Poppler is required by pdf2image (`brew install poppler`).
+# No system dependencies. PDF rendering is pypdfium2, which bundles pdfium in the
+# wheel; it replaced pdf2image/Poppler, which had to be installed separately and
+# is GPL - a problem to put inside a packaged desktop build that is sold.
 
 # Web app
 Django==4.2.23
+# Serves static files from inside the WSGI app. Django only serves them itself while
+# DEBUG is on, and the desktop build has no web server in front of it.
+whitenoise==6.9.0
 
 # Model / training
 torch==2.7.1
@@ -19,7 +24,7 @@ tensorboardX==2.6.4
 pillow==11.2.1
 scikit-image==0.24.0
 scipy==1.13.1
-pdf2image==1.17.0
+pypdfium2==5.13.0
 matplotlib==3.9.4
 
 # Font I/O

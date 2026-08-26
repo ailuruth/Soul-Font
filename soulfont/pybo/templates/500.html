@@ -1,0 +1,33 @@
+{% extends 'pybo/base.html' %}
+
+{% comment %}
+Same reasoning as 404.html. A 500 in the desktop build is more serious than a wrong URL,
+so this one says where the detail actually is: the app's own log, not a traceback on
+screen. DEBUG is off in the packaged build, so the user would otherwise see the word
+"Server Error (500)" on a white page and nothing else.
+{% endcomment %}
+
+{% block title %}Something went wrong{% endblock %}
+{% block app_name %}Soul Font{% endblock %}
+
+{% block content %}
+  <div class="app">
+    <div data-drag class="window app-window">
+      <div class="title-bar">
+        <a class="close" href="{% url 'desktop' %}" aria-label="Close" data-close></a>
+        <h1 class="title">Something went wrong</h1>
+        <span class="zoom" aria-hidden="true"></span>
+      </div>
+      <div class="separator"></div>
+
+      <div class="window-pane">
+        <h2 class="page-title">Soul Font hit an error</h2>
+        <p class="lede">
+          Nothing you have made was lost — your fonts and templates are still on this
+          machine. Going back to the desktop and trying again usually works.
+        </p>
+        <p><a class="btn default" href="{% url 'desktop' %}">Back to the desktop</a></p>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -102,6 +102,40 @@ def my_page(request):
                   {'fonts': Font.objects.all(), 'users': users, 'liked': liked,
                    'page_name': 'My Fonts'})
 
+def _acceleration():
+    """What this machine can actually do, cached for the process.
+
+    Imported lazily and guarded: describe_acceleration touches onnxruntime or torch, and
+    a page render must not fail because a backend probe did.
+    """
+    global _ACCEL_CACHE
+    if _ACCEL_CACHE is None:
+        try:
+            from foundry.generate import describe_acceleration
+            _ACCEL_CACHE = describe_acceleration()
+        except Exception as e:                                  # noqa: BLE001
+            print(f"[WARN] could not probe acceleration: {e}")
+            _ACCEL_CACHE = {"available": False, "label": "CPU",
+                            "detail": "Runs on the CPU."}
+    return _ACCEL_CACHE
+
+
+_ACCEL_CACHE = None
+
+
+def _build_estimate():
+    """How long a build really takes here, in the user's words.
+
+    The UI used to say "about two minutes" for a job that measured fifteen to twenty on a
+    fast Mac and longer on a CPU-only machine. Anyone who believed it concluded the app
+    had hung, and a progress bar cannot recover a promise that wrong.
+    """
+    if _acceleration().get("available"):
+        return "Usually 15-20 minutes on this machine."
+    return ("Usually 20-40 minutes on this machine, which has no GPU Soul Font can use. "
+            "It is working even when the bar moves slowly.")
+
+
 @login_required
 def user_page(request, font_id):
     user_data = get_object_or_404(UserData.objects.select_related('user'), id=font_id)
@@ -139,6 +173,7 @@ def user_page(request, font_id):
         'ttf_file_light': user_data.ttf_file_light,
         'ttf_file_bold': user_data.ttf_file_bold,
         'quote': user_data.quote,
+        'build_estimate': _build_estimate(),
     }
     return render(request, 'pybo/user_page.html', context)
 
@@ -151,7 +186,8 @@ def create_font(request):
             while f'{suggested} {n}' in taken:
                 n += 1
             suggested = f'{suggested} {n}'
-    return render(request, 'pybo/create_font.html', {'suggested_name': suggested})
+    return render(request, 'pybo/create_font.html',
+                  {'suggested_name': suggested, 'acceleration': _acceleration()})
 
 def _clamp_int(value, default, low, high):
     try:
@@ -168,18 +204,18 @@ def _clamp_float(value, default, low, high):
 def _has_pngs(path):
     return os.path.isdir(path) and any(f.lower().endswith('.png') for f in os.listdir(path))
 
-def _vectorize(glyph_dir, out_path, font_basename, font_id):
+def _vectorize(glyph_dir, out_path, font_basename, font_id, progress=None):
     """Trace a directory of glyph PNGs into a TTF at out_path."""
     if os.environ.get('SOULFONT_VECTORIZER', '').lower() != 'imagetracer':
         return build_ttf(glyph_dir, out_path, font_basename,
-                         fit_scales=script_fit_scales(glyph_dir))
+                         fit_scales=script_fit_scales(glyph_dir), progress=progress)
 
     generate_ttf_js = os.path.join(settings.BASE_DIR, 'foundry', 'generateTTF.js')
     subprocess.run(
         ['node', generate_ttf_js, str(font_id), os.path.basename(glyph_dir), font_basename],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True,
     )
-    src = os.path.join(settings.BASE_DIR, 'workdir', 'fonts', str(font_id), 'ttf_fonts',
+    src = os.path.join(settings.DATA_ROOT, 'workdir', 'fonts', str(font_id), 'ttf_fonts',
                        f'{font_basename}.ttf')
     if not os.path.exists(src):
         raise FileNotFoundError(f'TTF generation failed: {src} does not exist.')
@@ -345,7 +381,7 @@ def _family_readme(user_data, family, weight_count):
     lines += ['', f'PostScript family: {family}', 'Made with Soul Font.', '']
     return '\n'.join(lines)
 
-UPLOAD_FOLDER = os.path.join(settings.BASE_DIR, 'uploads')
+UPLOAD_FOLDER = os.path.join(settings.DATA_ROOT, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 TEMP_UPLOAD_DIR = os.path.join(settings.MEDIA_ROOT, 'temp_uploads')
@@ -368,14 +404,46 @@ def _set_status(font_id, stage=None, percent=None, status=None, error=None):
     if fields:
         UserData.objects.filter(id=font_id).update(**fields)
 
+# (label, start%, end%). A stage that takes minutes reports its own progress inside its
+# range through _sub_progress, so the bar keeps moving instead of sitting on one number.
+#
+# The ranges are sized by measured share of wall clock, but the split is not the same on
+# every machine: generating is ~27% of a build on Apple Silicon and ~69% on a CPU-only
+# machine, because the GPU accelerates generating and not tracing. No fixed split can be
+# right for both, which is exactly why each stage reports progress within its own range —
+# the bar then moves at an honest rate whichever end of that spread the user is on.
 STAGES = {
-    'start':    ('Reading your template', 0),
-    'generate': ('Generating glyphs', 2),
-    'prepare':  ('Cleaning up the strokes', 18),
-    'regular':  ('Building Regular', 61),
-    'light':    ('Building Light', 74),
-    'bold':     ('Building Bold', 86),
+    'start':    ('Reading your template', 0, 2),
+    'generate': ('Generating 11,172 characters', 2, 55),
+    'prepare':  ('Cleaning up the strokes', 55, 63),
+    'regular':  ('Building Regular', 63, 77),
+    'light':    ('Building Light', 77, 89),
+    'bold':     ('Building Bold', 89, 99),
 }
+
+
+def _stage(font_id, key, **kwargs):
+    label, start, _end = STAGES[key]
+    _set_status(font_id, label, start, **kwargs)
+
+
+def _sub_progress(font_id, key):
+    """-> callable(done, total) that moves the bar inside `key`'s range.
+
+    Without this the longest phases report one number and hold it for minutes, which
+    reads as a hang. Anyone watching a progress bar that has not moved assumes the thing
+    is broken, and the honest fix is to report the work actually being done.
+    """
+    label, start, end = STAGES[key]
+    span = end - start
+
+    def report(done, total):
+        if not total:
+            return
+        pct = start + span * min(done, total) / total
+        _set_status(font_id, f"{label} ({done:,}/{total:,})", int(pct))
+
+    return report
 
 def _dir_size(path):
     total = 0
@@ -390,7 +458,7 @@ def _dir_size(path):
 def _prune_build_files(font_id, user_font_dir, trace_source_name):
     """Delete the working files once the font itself is safely on disk."""
     style_id = f'user_{font_id}'
-    workdir = os.path.join(settings.BASE_DIR, 'workdir')
+    workdir = os.path.join(settings.DATA_ROOT, 'workdir')
     keep = {trace_source_name, FIT_FILE}
 
     doomed = [
@@ -420,17 +488,25 @@ def _prune_build_files(font_id, user_font_dir, trace_source_name):
 
 def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, device_name='auto'):
     style_id = f"user_{font_id}"
-    user_font_dir = os.path.join(settings.BASE_DIR, 'workdir', 'fonts', str(font_id))
+    user_font_dir = os.path.join(settings.DATA_ROOT, 'workdir', 'fonts', str(font_id))
+
+    # The name the user typed, written into the font as it is built. It used to be stamped
+    # with DEFAULT_FONT_NAME and only corrected if they later opened the metadata panel,
+    # so a font installed straight after building called itself "My Handwriting" in every
+    # font menu — and a second one collided with the first, because two families cannot
+    # share a name.
+    family_name = (UserData.objects.filter(id=font_id)
+                   .values_list('font_name', flat=True).first() or DEFAULT_FONT_NAME)
 
     try:
-        _set_status(font_id, *STAGES['start'], status=UserData.STATUS_RUNNING, error='')
+        _stage(font_id, 'start', status=UserData.STATUS_RUNNING, error='')
         user_pdf_path = os.path.join(UPLOAD_FOLDER, f"{style_id}.pdf")
         shutil.copyfile(template_pdf_path, user_pdf_path)
 
         print(f"[DEBUG] Starting FontStyleProcessor (charset={charset_path}, device={device_name})...")
-        _set_status(font_id, *STAGES['generate'])
+        _stage(font_id, 'generate')
         proc = FontStyleProcessor(user_pdf_path, charset_path=charset_path, device_name=device_name)
-        proc.run_all()
+        proc.run_all(progress=_sub_progress(font_id, 'generate'))
         print("[DEBUG] FontStyleProcessor finished")
 
         inferred_src_dir = proc.save_dir
@@ -450,8 +526,9 @@ def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, 
         trace_input_dir_name = 'trace_regular'
         trace_regular_dir = os.path.join(user_font_dir, trace_input_dir_name)
         try:
-            _set_status(font_id, *STAGES['prepare'])
-            prepare_trace_images(flipped_result_dir, trace_regular_dir)
+            _stage(font_id, 'prepare')
+            prepare_trace_images(flipped_result_dir, trace_regular_dir,
+                                 progress=_sub_progress(font_id, 'prepare'))
             print(f"[DEBUG] Prepared high-resolution trace images for {trace_input_dir_name}")
         except Exception as e:
             trace_input_dir_name = 'flipped_result'
@@ -460,11 +537,12 @@ def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, 
 
         shared_fit = {}
 
-        def build_weight(input_dir_name, font_basename, weight_label):
+        def build_weight(input_dir_name, font_basename, weight_label, stage_key):
             final_name = f'{font_basename}.ttf'
             final_path = os.path.join(TTF_OUTPUT_DIR, final_name)
             _vectorize(os.path.join(user_font_dir, input_dir_name), final_path,
-                       font_basename, font_id)
+                       font_basename, font_id,
+                       progress=_sub_progress(font_id, stage_key))
             try:
                 if not shared_fit:
                     shared_fit.update(measure_fit(final_path))
@@ -472,12 +550,12 @@ def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, 
                 refine_metrics(final_path, fit=shared_fit)
             except Exception as e:
                 print(f"[WARN] metrics refine skipped for {final_name}: {e}")
-            apply_metadata(final_path, DEFAULT_FONT_NAME, user_id=str(font_id),
+            apply_metadata(final_path, family_name, user_id=str(font_id),
                            weight=weight_label)
             return final_name
 
-        _set_status(font_id, *STAGES['regular'])
-        reg_name = build_weight(trace_input_dir_name, f'user_font_{font_id}', 'Regular')
+        _stage(font_id, 'regular')
+        reg_name = build_weight(trace_input_dir_name, f'user_font_{font_id}', 'Regular', 'regular')
         user_data = UserData.objects.get(id=font_id)
         user_data.ttf_file.name = os.path.join('ttf_files', reg_name)
         user_data.ttf_file_light = None
@@ -486,11 +564,11 @@ def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, 
         print(f"[DONE] font_id={font_id} Regular TTF generated -> {reg_name}")
 
         try:
-            _set_status(font_id, *STAGES['light'])
+            _stage(font_id, 'light')
             light_dir = os.path.join(user_font_dir, 'trace_light')
             make_weight_variant(trace_regular_dir, light_dir, weight='light',
                                 amount=AUTO_LIGHT_AMOUNT)
-            light_name = build_weight('trace_light', f'user_font_{font_id}_Light', 'Light')
+            light_name = build_weight('trace_light', f'user_font_{font_id}_Light', 'Light', 'light')
             user_data.ttf_file_light.name = os.path.join('ttf_files', light_name)
             user_data.save(update_fields=['ttf_file_light'])
             print(f"[DONE] font_id={font_id} Light generated -> {light_name}")
@@ -498,11 +576,11 @@ def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, 
             print(f"[WARN] font_id={font_id} Light weight generation skipped: {e}")
 
         try:
-            _set_status(font_id, *STAGES['bold'])
+            _stage(font_id, 'bold')
             bold_dir = os.path.join(user_font_dir, 'trace_bold')
             make_weight_variant(trace_regular_dir, bold_dir, weight='bold',
                                 amount=AUTO_BOLD_AMOUNT)
-            bold_name = build_weight('trace_bold', f'user_font_{font_id}_Bold', 'Bold')
+            bold_name = build_weight('trace_bold', f'user_font_{font_id}_Bold', 'Bold', 'bold')
             user_data.ttf_file_bold.name = os.path.join('ttf_files', bold_name)
             user_data.save(update_fields=['ttf_file_bold'])
             print(f"[DONE] font_id={font_id} Bold generated -> {bold_name}")
@@ -525,6 +603,50 @@ def _background_pipeline(template_pdf_path, font_id, charset_path=FULL_CHARSET, 
         print(f"[ERROR] font_id={font_id} pipeline failed: {e}")
         _set_status(font_id, status=UserData.STATUS_FAILED, error=str(e)[:500])
 
+MAX_TEMPLATE_BYTES = 80 * 1024 * 1024        # a 300dpi A4 scan is a few MB; 80 is generous
+
+
+def _validate_template(upload):
+    """Reject a file that cannot be a filled-in template. Returns an error string or None.
+
+    The page checks the extension in JavaScript, which catches an honest mistake and
+    nothing else. Without a check here, anything at all was accepted, a build started,
+    and the user waited for it to die somewhere deep in the pipeline with a raw Python
+    exception for a message. Failing in the first second with a sentence they can act on
+    is the whole difference.
+    """
+    if upload.size == 0:
+        return "That file is empty. Upload the scan of your filled-in template."
+    if upload.size > MAX_TEMPLATE_BYTES:
+        return (f"That file is {upload.size / 1e6:.0f} MB, which is larger than a scanned "
+                f"template should ever be. Scan at 300dpi and try again.")
+
+    head = upload.read(5)
+    upload.seek(0)
+    if head != b"%PDF-":
+        return ("That is not a PDF. Download the template, print it, write on it, then "
+                "scan it back to a PDF and upload that.")
+
+    # Page count, so a scan of the wrong thing fails now rather than after the crop.
+    try:
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(upload.temporary_file_path()) if hasattr(upload, "temporary_file_path") \
+            else pdfium.PdfDocument(upload.read())
+        try:
+            pages = len(doc)
+        finally:
+            doc.close()
+            upload.seek(0)
+    except Exception as e:                                    # noqa: BLE001
+        print(f"[WARN] could not read uploaded PDF: {e}")
+        return "That PDF could not be opened. It may be damaged — try scanning it again."
+
+    if pages != 1:
+        return (f"That PDF has {pages} pages. The template is a single page, so upload "
+                f"just the sheet you wrote on.")
+    return None
+
+
 @login_required
 def learning(request):
     if request.method == 'POST' and 'template' in request.FILES:
@@ -535,8 +657,17 @@ def learning(request):
             except Exception:
                 pass
 
+        upload = request.FILES['template']
+        problem = _validate_template(upload)
+        if problem:
+            # Nothing is created and no thread starts, so the user is back on the form
+            # with the reason, not watching a build that is going to fail.
+            return render(request, "pybo/create_font.html",
+                          {'acceleration': _acceleration(), 'upload_error': problem,
+                           'suggested_name': request.POST.get('font_name', '')})
+
         fs = FileSystemStorage(location=TEMP_UPLOAD_DIR)
-        saved_name = fs.save(request.FILES['template'].name, request.FILES['template'])
+        saved_name = fs.save(upload.name, upload)
         full_template_path = os.path.join(TEMP_UPLOAD_DIR, saved_name)
 
         charset_path = FULL_CHARSET
@@ -558,4 +689,4 @@ def learning(request):
 
         return redirect('user_page', font_id=font.id)
 
-    return render(request, "pybo/create_font.html")
+    return render(request, "pybo/create_font.html", {'acceleration': _acceleration()})

@@ -1,0 +1,21 @@
+# Extra dependencies for the desktop build (see desktop.py and packaging/soulfont.spec).
+#
+# Install these on top of requirements.txt. They are separate because the web app does
+# not need them, and because the desktop build deliberately does NOT install torch: the
+# ONNX backend replaces it, which is what takes the bundle from ~730 MB to ~420 MB.
+#
+# torch is still needed to EXPORT the graphs (scripts/export_onnx.py), just not to run
+# them. CI installs it for the export step and excludes it from the bundle.
+
+# Window shell. Uses the OS webview: WebKit on macOS, WebView2 on Windows.
+pywebview==6.2.1
+
+# WSGI server. Pure Python and identical on both platforms, which gunicorn (Unix only)
+# is not, and unlike Django's runserver it is meant to be used for real.
+waitress==3.0.2
+
+# Model runtime, in place of torch.
+onnxruntime==1.19.2
+
+# Build tool. Cannot cross-compile: the .app must be built on macOS, the .exe on Windows.
+pyinstaller==6.22.2

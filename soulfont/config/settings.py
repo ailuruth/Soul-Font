@@ -12,18 +12,31 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# BASE_DIR is read-only in a packaged build, so anything written at runtime goes to
+# DATA_ROOT instead. From a checkout the two are the same and nothing moves.
+sys.path.insert(0, str(BASE_DIR))
+import apppaths  # noqa: E402
+
+DATA_ROOT = apppaths.DATA_ROOT
+apppaths.ensure_data_dirs()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-i3f4iyw_$a+596*=vexcwu37*gu0ponf91z!&5w^)du3&$-pcu'
+# A packaged install generates its own key on first run and keeps it in DATA_ROOT, so
+# two installs never share one. The literal below stays for development only.
+SECRET_KEY = (apppaths.install_secret_key() if os.environ.get('SOULFONT_APP') == '1'
+              else 'django-insecure-i3f4iyw_$a+596*=vexcwu37*gu0ponf91z!&5w^)du3&$-pcu')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# The desktop build serves only 127.0.0.1 and must not show tracebacks to end users.
+DEBUG = os.environ.get('SOULFONT_APP') != '1'
 
 # Application definition
 
@@ -39,6 +52,10 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Static files have no web server in front of them in the desktop build, and Django
+    # only serves them itself while DEBUG is on. WhiteNoise serves them from inside the
+    # WSGI app, which is the same in both modes.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -74,7 +91,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',  
+        'NAME': os.path.join(DATA_ROOT, 'db.sqlite3'),
     }
 }
 
@@ -112,7 +129,14 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 STATIC_URL = '/static/'
 
-ALLOWED_HOSTS = ['*', 'pythonanywhere.com', 'localhost', '10.171.24.201']
+# Serve straight out of STATICFILES_DIRS rather than requiring collectstatic first, so a
+# checkout run with SOULFONT_APP=1 behaves like the packaged build. The packaged build
+# does run collectstatic, and WhiteNoise prefers STATIC_ROOT when it is populated.
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = os.environ.get('SOULFONT_APP') != '1'
+
+ALLOWED_HOSTS = (['127.0.0.1', 'localhost'] if os.environ.get('SOULFONT_APP') == '1'
+                 else ['*', 'pythonanywhere.com', 'localhost', '10.171.24.201'])
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -121,4 +145,4 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_URL = '/media/'
 
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.path.join(DATA_ROOT, 'media')

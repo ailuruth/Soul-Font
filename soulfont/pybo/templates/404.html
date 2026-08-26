@@ -1,0 +1,32 @@
+{% extends 'pybo/base.html' %}
+
+{% comment %}
+Django serves its own bare "Not Found" page once DEBUG is off, which is what the desktop
+build runs. In a browser that is merely ugly; inside an app window it is a dead end —
+unstyled text, no menu bar, and no way back to the desk short of quitting.
+{% endcomment %}
+
+{% block title %}Not found{% endblock %}
+{% block app_name %}Soul Font{% endblock %}
+
+{% block content %}
+  <div class="app">
+    <div data-drag class="window app-window">
+      <div class="title-bar">
+        <a class="close" href="{% url 'desktop' %}" aria-label="Close" data-close></a>
+        <h1 class="title">Not found</h1>
+        <span class="zoom" aria-hidden="true"></span>
+      </div>
+      <div class="separator"></div>
+
+      <div class="window-pane">
+        <h2 class="page-title">There is nothing here</h2>
+        <p class="lede">
+          That page does not exist. It may have been a font that was deleted, or a link
+          that is out of date.
+        </p>
+        <p><a class="btn default" href="{% url 'desktop' %}">Back to the desktop</a></p>
+      </div>
+    </div>
+  </div>
+{% endblock %}
