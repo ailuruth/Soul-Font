@@ -129,4 +129,5 @@ including `865d66d` remains available under MIT to anyone who obtained it then.
 The licence change applies from this commit forward.
 
 What this licence does not cover: the **third-party components** — DM-Font, system.css,
-Galmuri, the Python dependencies — keep their own terms. See [NOTICE](NOTICE).
+Galmuri, the Python dependencies — keep their own terms, recorded in their per-file
+copyright headers.

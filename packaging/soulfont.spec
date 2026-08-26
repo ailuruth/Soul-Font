@@ -44,10 +44,6 @@ _maruburi = os.path.join(APP, "media", "ttf_files", "MaruBuri-Regular.ttf")
 if os.path.isfile(_maruburi):
     datas.append((_maruburi, "media/ttf_files"))
 
-# The attribution notice has to reach whoever gets only the binary: the per-file
-# copyright headers are in the source, and a packaged app has no source.
-datas.append((os.path.join(ROOT, "NOTICE"), "."))
-
 datas += collect_data_files("pypdfium2_raw")     # libpdfium
 datas += collect_data_files("onnxruntime")
 
