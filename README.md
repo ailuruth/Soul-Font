@@ -128,11 +128,5 @@ Earlier releases were MIT. That grant is not revoked: any commit up to and
 including `865d66d` remains available under MIT to anyone who obtained it then.
 The licence change applies from this commit forward.
 
-Three things this licence does not cover:
-
-- **Third-party components** — DM-Font, system.css, Galmuri, the Node and Python
-  dependencies — keep their own terms. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md),
-  which also documents the checkpoint's provenance and the one file removed from
-  upstream DM-Font because its licence forbids commercial use.
-- **Fonts sold from this pipeline**, which ship under [FONT-EULA.md](FONT-EULA.md).
-- **The hosted service**, governed by [TERMS.md](TERMS.md).
+What this licence does not cover: the **third-party components** — DM-Font, system.css,
+Galmuri, the Python dependencies — keep their own terms. See [NOTICE](NOTICE).

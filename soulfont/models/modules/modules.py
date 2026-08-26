@@ -17,7 +17,7 @@ def split_dim(x, dim, n_chunks):
 # and so forbids commercial use — the one carve-out from DM-Font's own MIT grant.
 # Soul Font is now sold, so it cannot ship. It was reachable only from
 # dmfont/train.py; inference never touched it. Do not restore it from upstream.
-# See THIRD-PARTY-NOTICES.md.
+# See NOTICE.
 
 
 def spectral_norm(module):

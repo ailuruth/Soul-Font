@@ -1,0 +1,29 @@
+Soul Font bundles the components below. Their licences require this notice to travel
+with any copy — source or packaged app — so it ships inside the build too.
+
+DM-Font  (soulfont/dmfont, models, utils, datasets, meta, config)
+  Copyright (c) 2020-present NAVER Corp.  MIT.  github.com/clovaai/dmfont
+  weights_init was removed from models/modules/modules.py: upstream adopted it from
+  NVlabs/FUNIT, which is CC BY-NC-SA 4.0 and bars commercial use. Do not restore it.
+
+system.css      Copyright (c) 2022 Sakun Acharige.  MIT.
+html2canvas     Copyright (c) Niklas von Hertzen.  MIT.
+Galmuri         Copyright (c) 2019-2025 Lee Minseo.  SIL OFL 1.1 — see
+                soulfont/static/vendor/galmuri/NOTICE.txt
+MaruBuri        (c) NAVER Corp., NAVER Cultural Foundation.  SIL OFL 1.1.
+pdfium          BSD-3-Clause, via pypdfium2 (BSD-3-Clause / Apache-2.0).
+
+Chicago, Geneva and Monaco faces under soulfont/static/vendor/system/ arrived with
+system.css. Monaco is Apple's own typeface and is not known to be licensed for
+redistribution; the others are third-party recreations whose terms are unverified.
+
+Python and runtime dependencies — Django, PyTorch, NumPy, SciPy, Pillow, fontTools,
+scikit-image, onnxruntime, whitenoise, waitress, pywebview — are BSD-3-Clause, MIT or
+Apache-2.0. PyInstaller is GPL-2.0 with a bundling exception that keeps packaged
+applications under their own licence.
+
+The pretrained checkpoint is not distributed here. It comes from the DM-Font v1.0.0
+release and, per DM-Font's README, was trained on UhBee fonts, whose terms bar paid
+distribution of conversion results. Whether glyphs generated in a user's own hand are
+such a result is unsettled. Clear it with the rights holder (font@uhbee.net) or retrain
+on fonts you have licensed before selling.

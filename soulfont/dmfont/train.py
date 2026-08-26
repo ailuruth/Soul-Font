@@ -295,7 +295,7 @@ def main():
     # The custom weight initialiser that ran here (and on disc/aux_clf below) was
     # FUNIT's, CC BY-NC-SA 4.0, and was removed when Soul Font went commercial.
     # PyTorch's default initialisation now applies, so training from scratch will
-    # not reproduce the published checkpoint. See THIRD-PARTY-NOTICES.md.
+    # not reproduce the published checkpoint. See NOTICE.
 
     d_kwargs = cfg.get('d_args', {})
     disc = Discriminator(cfg['C'], trn_dset.n_fonts, trn_dset.n_chars, **d_kwargs)
