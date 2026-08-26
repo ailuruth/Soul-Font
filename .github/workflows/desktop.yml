@@ -8,6 +8,11 @@ name: Desktop build
 # job downloads the upstream checkpoint and exports the graphs itself. That makes the
 # model in a build traceable to a specific upstream release rather than to a blob someone
 # once committed.
+#
+# macOS builds are Apple Silicon only. The macos-14 runner is arm64 and PyInstaller
+# packages for the machine it runs on, so an Intel Mac cannot run the result — which is
+# why the filename says arm64 rather than leaving someone to discover it after
+# downloading 245 MB.
 
 on:
   workflow_dispatch:
@@ -27,13 +32,11 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            artifact: SoulFont-macos
+            platform: macos-arm64
             bundle: dist/Soul Font.app
-            package: SoulFont-macos.dmg
           - os: windows-latest
-            artifact: SoulFont-windows
+            platform: windows-x64
             bundle: dist/SoulFont
-            package: SoulFont-windows.zip
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -43,14 +46,27 @@ jobs:
         with:
           python-version: '3.9'
 
+      # The version people will read off the filename months later. A tag gives the real
+      # one; a manual run gets a dev marker with the commit, so a hand-triggered build can
+      # never be mistaken for a release.
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0-dev.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pywebview waitress whitenoise onnxruntime pyinstaller
+          pip install -r requirements.txt -r requirements-desktop.txt
 
-      # torch is needed to export the graphs, but is excluded from the bundle itself.
-      - name: Install torch (export only)
+      # torch is needed to export the graphs and to verify them, but is excluded from the
+      # bundle itself — that exclusion is what makes it ~310 MB smaller.
+      - name: Install torch (export and verification only)
         run: pip install torch==2.7.1 torchvision==0.22.1
 
       - name: Cache the checkpoint
@@ -89,35 +105,55 @@ jobs:
         shell: bash
         run: python packaging/smoke_test.py "${{ matrix.bundle }}"
 
-      # A .app is 161 symlinks and an executable bit, and actions/upload-artifact zips
-      # without preserving either — the download would not launch. A DMG is the format
-      # macOS distributes in anyway, and hdiutil keeps the bundle intact.
+      # A .app is 161 symlinks and an executable bit, and a zip preserves neither, so the
+      # download would not launch. A DMG is what macOS distributes in anyway.
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           mkdir -p staging
           cp -R "dist/Soul Font.app" staging/
           ln -s /Applications staging/Applications
-          hdiutil create -volname "Soul Font" -srcfolder staging \
-            -ov -format UDZO "SoulFont-macos.dmg"
+          hdiutil create -volname "Soul Font" -srcfolder staging -ov -format UDZO \
+            "SoulFont-${{ steps.version.outputs.value }}-${{ matrix.platform }}.dmg"
 
-      # Windows has no permission bits to lose, so a plain zip is enough.
+      # Windows has no permission bits or symlinks to lose, so a plain zip is enough.
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path dist/SoulFont/* -DestinationPath SoulFont-windows.zip
+        run: |
+          Compress-Archive -Path dist/SoulFont/* `
+            -DestinationPath "SoulFont-${{ steps.version.outputs.value }}-${{ matrix.platform }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.package }}
+          name: SoulFont-${{ matrix.platform }}
+          path: SoulFont-${{ steps.version.outputs.value }}-${{ matrix.platform }}.*
           if-no-files-found: error
 
-      # Artifacts expire and need a GitHub login, so they are for checking a build, not
-      # for giving anyone the app. A tagged build also attaches to the Release, which is
-      # the page people can actually download from.
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
+  # Both packages have to exist before checksums can be written, and one SHA256SUMS.txt
+  # covering everything is the convention — a per-file checksum next to each download is
+  # more files to lose track of and no more useful.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: packages
+        run: |
+          sha256sum SoulFont-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.package }}
+          files: packages/*
+          body_path: packaging/release-notes.md
+          generate_release_notes: true      # appends the commit log under the notes
           fail_on_unmatched_files: true

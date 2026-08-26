@@ -10,6 +10,14 @@ the result into outlines, and gives you a Light/Regular/Bold TTF family.
 
 ![Soul Font — the desktop with Fonts, Letter and a font's page open](docs/DEMO.png)
 
+## Download
+
+[**Get the app**](https://github.com/nobel2040ne/Soul-Font/releases/latest) — macOS (Apple
+Silicon) and Windows. Nothing else to install; the model ships inside it. Builds are
+unsigned, so both systems warn on first launch — the release notes say how to get past it.
+
+To run it from source instead, see [Setup](#setup).
+
 Demo: https://www.youtube.com/watch?v=X25yWyhzacM
 
 ## Setup
