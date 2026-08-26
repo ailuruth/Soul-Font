@@ -4,9 +4,9 @@
 [![Django](https://img.shields.io/badge/Django-4.2-092E20?style=flat&logo=django&logoColor=white)](https://www.djangoproject.com/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.7-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
 
-Soul Font turns a filled-in PDF template into an installable Korean font. You hand-write 28
-characters, and it generates the rest of Hangul, traces the result into outlines, and gives
-you a Light/Regular/Bold TTF family.
+Soul Font turns a filled-in PDF template into an installable Korean font. You hand-write 33
+Korean syllables — all of them ordinary words — and it generates the rest of Hangul, traces
+the result into outlines, and gives you a Light/Regular/Bold TTF family.
 
 ![Soul Font — the desktop with Fonts, Letter and a font's page open](docs/DEMO.png)
 

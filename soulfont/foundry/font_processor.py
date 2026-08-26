@@ -9,6 +9,7 @@ from pdf2image import convert_from_path  # type: ignore
 from foundry.inference import main as inference_main
 from foundry.char_layout import (
     ALLOWED_TEMPLATE_CELL_COUNTS,
+    PREVIOUS_LAYOUT_GUIDE_COUNT,
     FULL_TEMPLATE_CELL_COUNT,
     KOR_STYLE_CELL_COUNT,
     KOR_STYLE_CHARS,
@@ -635,6 +636,23 @@ class FontStyleProcessor:
                 "single 10x13 page. Download the template again and use that one."
             )
 
+        # A v4 sheet crops to 130 images too, so the count alone cannot tell it from a v5
+        # one — but v4 printed only 125 guides, leaving its last five cells empty, and v5
+        # fills every cell. If those trailing cells carry no ink this is the old sheet, and
+        # accepting it would build the font from the wrong 33 style characters and succeed
+        # while doing it.
+        if count == FULL_TEMPLATE_CELL_COUNT:
+            tail = cleaned_paths[PREVIOUS_LAYOUT_GUIDE_COUNT:]
+            if tail and all(self._ink_pixels(p) < INK_PIXEL_THRESHOLD for p in tail):
+                raise ValueError(
+                    "This looks like the previous template: its last "
+                    f"{len(tail)} cells are empty, and the current sheet has a guide in "
+                    "every one of its 130 cells. The Korean cells have changed, so a font "
+                    "built from the old sheet would come out wrong. Download the template "
+                    "again and fill in the new one. (If you did use the current sheet, "
+                    "those last cells were left blank — write them and upload again.)"
+                )
+
         style_paths = cleaned_paths[:KOR_STYLE_CELL_COUNT]
         blank_cells = [
             i + 1 for i, path in enumerate(style_paths)
@@ -651,7 +669,7 @@ class FontStyleProcessor:
         return cleaned_paths
 
     def generate_yaml(self, target_chars):
-        # Only the first 28 cells are Korean style references for the model; any extra
+        # Only the first 33 cells are Korean style references for the model; any extra
         # cells are English/special glyphs handled by copy_traced_glyphs().
         cleaned_paths = self._validated_cleaned_paths()
         style_imgs, _ = split_cells(cleaned_paths)

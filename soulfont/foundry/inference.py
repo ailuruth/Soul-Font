@@ -148,7 +148,7 @@ def _autocast(device, use_amp=True):
 
     Refused on MPS: it is a further 1.5x faster than fp32 there, but measured against a
     CPU reference it corrupted all 400 glyphs in the probe (mean |difference| 0.13 on a
-    [-1, 1] output) — the model's component memory accumulates over 28 style images and
+    [-1, 1] output) — the model's component memory accumulates over 33 style images and
     half precision loses the small contributions. Set SOUL_FONT_FORCE_AMP=1 to override.
     """
     if use_amp and device.type == "mps" and os.environ.get("SOUL_FONT_FORCE_AMP") != "1":

@@ -30,7 +30,7 @@ gone.
 | 1 | PDF to page rasters | `FontStyleProcessor.convert_pdf_to_images` | `workdir/crops/user_<id>/`, 300 dpi |
 | 2 | page to cells | `foundry/crop.py` (subprocess) | `cropped/` trimmed to the mark, `framed/` keeping cell framing |
 | 3 | ink/paper split | `clean_images` | `cleaned/`, 128×128 |
-| 4 | cells to characters | `char_layout.split_cells` | 28 style refs, then Latin/digits/punctuation |
+| 4 | cells to characters | `char_layout.split_cells` | 33 style refs, then Latin/digits/punctuation |
 | 5 | generate Hangul | `foundry/inference.py` | `workdir/glyphs/user_<id>/inferred_<CP>.png` |
 | 6 | Latin bypass | `copy_traced_glyphs` | same directory, from the 512 px framed crops |
 | 7 | raster cleanup | `prepare_trace_images` | `workdir/fonts/<id>/trace_regular/` |
@@ -45,7 +45,7 @@ much is trimmed and how far down the guide glyph is printed are two halves of on
 and this file changes with it. Cell count and blank style cells are validated before
 inference, so a bad upload is an error on the page rather than a garbage font.
 
-Inference is DM-Font's `MACore` in two stages: encode the 28 style images into component
+Inference is DM-Font's `MACore` in two stages: encode the 33 style images into component
 memory, decode each target syllable out of it. Targets are filtered to `[가-힣]` — the model
 knows Hangul only, which is why Latin bypasses it. The generator is cached per (checkpoint,
 config, device) and `_INFER_LOCK` serializes runs, because that cached component memory is
