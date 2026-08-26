@@ -67,3 +67,24 @@ uneven stroke width is smoothed out.
 - No font appears — it builds in a background thread, so the reason is in the server log.
 
 Defaults are for local development: SQLite, `DEBUG = True`, and no password validation.
+
+## Licence
+
+Soul Font is **source-available, not open source**. The code is licensed under
+[PolyForm Noncommercial 1.0.0](LICENSE): read it, run it, modify it and share it
+for any noncommercial purpose — personal projects, study, research, teaching. What
+it does not grant is commercial use, which is reserved. For a commercial licence,
+write to nobel2040ne@gmail.com.
+
+Earlier releases were MIT. That grant is not revoked: any commit up to and
+including `865d66d` remains available under MIT to anyone who obtained it then.
+The licence change applies from this commit forward.
+
+Three things this licence does not cover:
+
+- **Third-party components** — DM-Font, system.css, Galmuri, the Node and Python
+  dependencies — keep their own terms. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md),
+  which also documents the checkpoint's provenance and the one file removed from
+  upstream DM-Font because its licence forbids commercial use.
+- **Fonts sold from this pipeline**, which ship under [FONT-EULA.md](FONT-EULA.md).
+- **The hosted service**, governed by [TERMS.md](TERMS.md).

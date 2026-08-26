@@ -24,7 +24,6 @@ from sconf import Config, dump_args
 
 from dmfont.logger import Logger
 from models import MACore, Discriminator, AuxClassifier
-from models.modules import weights_init
 from datasets import HDF5Data, get_ma_dataset, get_ma_val_dataset
 import datasets.kor_decompose as kor
 import datasets.thai_decompose as thai
@@ -293,18 +292,19 @@ def main():
         language=cfg['language']
     )
     gen.cuda()
-    gen.apply(weights_init(cfg['init']))
+    # The custom weight initialiser that ran here (and on disc/aux_clf below) was
+    # FUNIT's, CC BY-NC-SA 4.0, and was removed when Soul Font went commercial.
+    # PyTorch's default initialisation now applies, so training from scratch will
+    # not reproduce the published checkpoint. See THIRD-PARTY-NOTICES.md.
 
     d_kwargs = cfg.get('d_args', {})
     disc = Discriminator(cfg['C'], trn_dset.n_fonts, trn_dset.n_chars, **d_kwargs)
     disc.cuda()
-    disc.apply(weights_init(cfg['init']))
 
     if cfg['ac_w'] > 0.:
         C = gen.mem_shape[0]
         aux_clf = AuxClassifier(C, n_comps, **cfg['ac_args'])
         aux_clf.cuda()
-        aux_clf.apply(weights_init(cfg['init']))
     else:
         aux_clf = None
         assert cfg['ac_gen_w'] == 0., "ac_gen loss is only available with ac loss"
