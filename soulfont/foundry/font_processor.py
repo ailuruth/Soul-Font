@@ -9,6 +9,7 @@ from pdf2image import convert_from_path  # type: ignore
 from foundry.inference import main as inference_main
 from foundry.char_layout import (
     ALLOWED_TEMPLATE_CELL_COUNTS,
+    LEGACY_LAYOUT,
     PREVIOUS_LAYOUT_GUIDE_COUNT,
     FULL_TEMPLATE_CELL_COUNT,
     KOR_STYLE_CELL_COUNT,
@@ -641,7 +642,7 @@ class FontStyleProcessor:
         # fills every cell. If those trailing cells carry no ink this is the old sheet, and
         # accepting it would build the font from the wrong 33 style characters and succeed
         # while doing it.
-        if count == FULL_TEMPLATE_CELL_COUNT:
+        if count == FULL_TEMPLATE_CELL_COUNT and not LEGACY_LAYOUT:
             tail = cleaned_paths[PREVIOUS_LAYOUT_GUIDE_COUNT:]
             if tail and all(self._ink_pixels(p) < INK_PIXEL_THRESHOLD for p in tail):
                 raise ValueError(

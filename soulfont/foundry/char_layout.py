@@ -14,6 +14,7 @@ If a template only has the Korean cells, EXTRA_CHARS simply maps to nothing and 
 pipeline behaves exactly as before.
 """
 import math
+import os
 
 TEMPLATE_LAYOUT_VERSION = "kor-33-plus-ascii-v5-10x13"
 
@@ -40,6 +41,20 @@ CELL_PAD_FRAC = 0.06     # trimmed off every cell edge — drops the printed gri
 TOP_EXTRA_FRAC = 0.14    # trimmed off the cell top as well — drops the printed guide glyph
 # The band the guide has to fit inside, measured from the very top of the cell.
 GUIDE_BAND_FRAC = CELL_PAD_FRAC + TOP_EXTRA_FRAC
+
+# Reprocessing sheets that were filled in before v2.0.0.
+#
+# Set SOULFONT_TEMPLATE_LAYOUT=v4 and the whole pipeline — style characters, layout
+# version, and the v4 sheet check in font_processor — goes back to the 28-cell set below.
+# It exists so a sheet somebody already wrote on by hand does not have to be thrown away;
+# it is not a supported mode, and nothing should be built on it. Unset the variable and
+# the default is v5 again.
+#
+# The v4 sheet's last five cells are blank, so under v5 the pipeline correctly refuses it.
+LEGACY_LAYOUT = os.environ.get("SOULFONT_TEMPLATE_LAYOUT", "").strip().lower() == "v4"
+
+_V4_STYLE_CHARS = "각깪냓댼떥렎멷볠뽉솲쐛욄죭쭲춣퀨튑퓺흣읬잉잊잋잌잍잎잏이"
+_V4_LAYOUT_VERSION = "kor-28-plus-ascii-v4-10x13"
 
 # The Korean style references, in template-cell order.
 #
@@ -85,6 +100,12 @@ KOR_STYLE_WORDS = {
 }
 KOR_STYLE_CHARS = list("얘예돼의퀵밖넋왼앉찮뜯쌀읽굶짧곬훑읊끓탐웹값셋줬빵왕룡맺윷엌팥옆얗")
 assert list(KOR_STYLE_WORDS) == KOR_STYLE_CHARS, "words and chars must stay in step"
+
+if LEGACY_LAYOUT:
+    # Deliberately after the v5 definitions, so the block above stays the readable default.
+    KOR_STYLE_CHARS = list(_V4_STYLE_CHARS)
+    KOR_STYLE_WORDS = {}          # the v4 set is not made of words; that was the problem
+    TEMPLATE_LAYOUT_VERSION = _V4_LAYOUT_VERSION
 
 
 def _assert_component_coverage():
