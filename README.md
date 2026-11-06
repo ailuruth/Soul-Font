@@ -12,7 +12,7 @@ the result into outlines, and gives you a Light/Regular/Bold TTF family.
 
 ## Download
 
-[**Get the app**](https://github.com/nobel2040ne/Soul-Font/releases/latest) — macOS (Apple
+[**Get the app**](https://github.com/ailuruth/Soul-Font/releases/latest) — macOS (Apple
 Silicon) and Windows. Nothing else to install; the model ships inside it. Builds are
 unsigned, so both systems warn on first launch — the release notes say how to get past it.
 
