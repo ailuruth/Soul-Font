@@ -112,6 +112,8 @@ uneven stroke width is smoothed out.
 plays 14 OFL handwriting fonts as writers, generates 200 syllables each from their 33
 template cells, and scores the result against the fonts' own glyphs. Run it before and
 after any change to how references are prepared or output is post-processed.
+`scripts/eval_spacing.py` does the same for spacing, against the bearings those fonts'
+designers chose.
 
 ## Troubleshooting
 

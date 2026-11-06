@@ -55,6 +55,11 @@ wrote replace the model's versions of them. `foundry/hand.py` holds both decisio
 measurements behind them, and `scripts/eval_generation.py` reruns those measurements
 against 14 OFL handwriting fonts whose every glyph is known.
 
+`refine_metrics` spaces by the white a reader sees rather than by bounding boxes: each
+glyph's side bearings give back part of the air its own shape already leaves at the edge,
+and the word space follows the size of the writing. `foundry/spacing.py` holds the rule and
+`scripts/eval_spacing.py` checks it against the bearings designers chose for their fonts.
+
 Inference is DM-Font's `MACore` in two stages: encode the 33 style images into component
 memory, decode each target syllable out of it. Targets are filtered to `[가-힣]` — the model
 knows Hangul only, which is why Latin bypasses it. The generator is cached per (checkpoint,

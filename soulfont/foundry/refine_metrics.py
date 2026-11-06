@@ -29,8 +29,17 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._g_l_y_f import Glyph, GlyphCoordinates
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
+from foundry import spacing
+
 TARGET_UPEM = 1000
-SPACE_ADVANCE = 320    # advance for empty glyphs (space)
+# The word space, from the size of the writing rather than a fixed width. Across the 14
+# Korean handwriting fonts on Google Fonts it sits at 0.31 of a median Hangul syllable's
+# height and never under 0.40 of the cap height; that rule lands 11% from the designers'
+# own spaces on average (scripts/eval_spacing.py). A fixed 320 units came out at twice the designers' share of a syllable for
+# a narrow hand, and Korean text fell apart into separate words.
+SPACE_PER_HANGUL_HEIGHT = 0.31
+SPACE_MIN_PER_CAP = 0.40
+SPACE_PER_CAP = 0.49          # when there is no Hangul to size it from
 
 # --- Latin fitting --------------------------------------------------------------------
 # Each template cell is square-padded around the letter, and the whole cell maps to the em,
@@ -45,9 +54,16 @@ LATIN_CAP_TARGET = 0.60
 # Letters keep the framing of the template cell they were written in, so they sit small
 # inside it and the scale needed to reach a real cap height is correspondingly large.
 LATIN_SCALE_LIMITS = (0.6, 6.0)
-# Side bearing as a share of the cap height, so it tracks the letters it separates.
-LATIN_SB_RATIO = 0.055
-LATIN_SB_LIMITS = (16, 90)
+# Mean (left, right) side bearing per kind of mark, as a share of the cap height: the
+# medians of the 14 Korean handwriting fonts on Google Fonts. Punctuation gets half as much
+# air again as a letter; one bearing for everything set it too tight. foundry.spacing
+# spreads each mean over the glyphs by how much white each brings of its own.
+LATIN_BEARINGS = {
+    'lower': (0.058, 0.065),
+    'upper': (0.062, 0.065),
+    'digit': (0.069, 0.071),
+    'mark': (0.097, 0.092),
+}
 
 # --- Hangul fitting -------------------------------------------------------------------
 # Tall syllables should reach this share of the em. The scale derived from it is applied
@@ -55,10 +71,10 @@ LATIN_SB_LIMITS = (16, 90)
 KOR_TARGET_HEIGHT = 0.80
 KOR_HEIGHT_PERCENTILE = 90   # "a tall syllable" — ignores the few outliers that overshoot
 KOR_SCALE_LIMITS = (0.75, 1.35)
-# Side bearing as a share of the em. Nanum 손글씨, 온글잎 and NanumSeongSirCe all sit at
-# ~0.023 em regardless of how wide their syllables are: Hangul gets its rhythm from the
-# internal structure of the syllable, not from air around its bounding box. Anything much
-# larger and Korean stops reading as words.
+# Mean side bearing as a share of the em. Nanum 손글씨, 온글잎 and NanumSeongSirCe all sit
+# at ~0.023 em on average: Hangul gets its rhythm from the internal structure of the
+# syllable, not from air around its bounding box. Anything much larger and Korean stops
+# reading as words. foundry.spacing varies it per syllable around this mean.
 KOR_SB_EM = 0.025
 # Floor on the advance so the narrowest syllables (이, 니) still get room to breathe.
 KOR_MIN_ADVANCE = 0.28
@@ -370,6 +386,42 @@ def _add_glyph(font, name, glyph, metrics):
 
 
 # ---------------------------------------------------------------------------
+def _latin_kind(cp):
+    ch = chr(cp)
+    if 'a' <= ch <= 'z':
+        return 'lower'
+    if 'A' <= ch <= 'Z':
+        return 'upper'
+    if '0' <= ch <= '9':
+        return 'digit'
+    return 'mark'
+
+
+def _clamp_bearing(value, mean):
+    """Keep an optical bearing within reach of its mean.
+
+    A glyph that is nearly all white at its edge (a lone stroke, a period) can be owed a
+    negative bearing; past -mean its ink would start to touch the neighbour's.
+    """
+    return min(3.0 * mean, max(-mean, value))
+
+
+def _seat(glyph, glyf, hmtx, name, lsb, ink_w, rsb, min_advance=1, max_advance=None):
+    """Move the ink so it starts `lsb` in, and set the advance to lsb + ink + rsb.
+
+    An advance pushed up to `min_advance` shares the extra evenly between the two sides.
+    """
+    advance = lsb + ink_w + rsb
+    if advance < min_advance:
+        lsb += (min_advance - advance) / 2.0
+        advance = min_advance
+    if max_advance is not None:
+        advance = min(advance, max_advance)
+    _shift(glyph, dx=round(lsb) - glyph.xMin, dy=0)
+    glyph.recalcBounds(glyf)
+    hmtx[name] = (max(1, round(advance)), glyph.xMin)
+
+
 def _shift(glyph, dx, dy, scale=1.0):
     coords = glyph.coordinates
     for i in range(len(coords)):
@@ -428,13 +480,10 @@ def _compute_latin_fit(glyf, cp_of, latin_names, upem):
     if caps:
         scale = min(LATIN_SCALE_LIMITS[1],
                     max(LATIN_SCALE_LIMITS[0], target_cap / (_median(caps) or 1)))
-    side_bearing = min(LATIN_SB_LIMITS[1],
-                       max(LATIN_SB_LIMITS[0], round(LATIN_SB_RATIO * target_cap)))
 
     # The x-line, measured rather than assumed: it is where descender bowls get hung from.
     x_height = round(_median(x_heights) * scale) if x_heights else round(0.55 * target_cap)
-    return {'scale': scale, 'side_bearing': side_bearing,
-            'cap_height': round(target_cap), 'x_height': x_height}
+    return {'scale': scale, 'cap_height': round(target_cap), 'x_height': x_height}
 
 
 def measure_fit(ttf_path):
@@ -495,41 +544,57 @@ def refine_metrics(ttf_path, out_path=None, fit=None):
     # --- Hangul: one shared scale, then proportional advances --------------------------
     kor_scale, kor_sb = kor_fit['scale'], kor_fit['side_bearing']
 
+    inked = []
     for name in kor_names:
         glyph = glyf[name]
         if glyph.numberOfContours <= 0:
             hmtx[name] = (round(KOR_TARGET_HEIGHT * upem * 0.5), 0)
             continue
-        # Scale about the baseline so the syllables keep sitting where they were drawn,
-        # then centre the ink in an advance sized from its own width.
+        # Scale about the baseline so the syllables keep sitting where they were drawn.
         _shift(glyph, dx=0, dy=0, scale=kor_scale)
         glyph.recalcBounds(glyf)
+        inked.append(name)
+
+    kor_bearings = {}
+    if inked:
+        glyphset = font.getGlyphSet()
+        # The body of the script: where half the syllables start and half of them end.
+        band = (_median([glyf[n].yMin for n in inked]), _median([glyf[n].yMax for n in inked]))
+        depth = spacing.HANGUL_DEPTH * (band[1] - band[0])
+        whites = {n: w for n in inked
+                  if (w := spacing.white(glyphset, n, band, depth)) is not None}
+        kor_bearings = spacing.bearings(whites, (kor_sb, kor_sb), spacing.HANGUL_GIVE_BACK)
+    if inked:
+        word_space = max(SPACE_MIN_PER_CAP * lat_fit['cap_height'], SPACE_PER_HANGUL_HEIGHT *
+                         _median([glyf[n].yMax - glyf[n].yMin for n in inked]))
+    else:
+        word_space = SPACE_PER_CAP * lat_fit['cap_height']
+    word_space = round(word_space)
+
+    for name in inked:
+        glyph = glyf[name]
+        lsb, rsb = (_clamp_bearing(b, kor_sb) for b in kor_bearings.get(name, (kor_sb, kor_sb)))
         ink_w = glyph.xMax - glyph.xMin
-        advance = min(upem, max(KOR_MIN_ADVANCE * upem, ink_w + 2 * kor_sb))
-        lsb = round((advance - ink_w) / 2)
-        _shift(glyph, dx=lsb - glyph.xMin, dy=0)
-        glyph.recalcBounds(glyf)
-        hmtx[name] = (max(1, round(advance)), lsb)
+        _seat(glyph, glyf, hmtx, name, lsb, ink_w, rsb,
+              min_advance=KOR_MIN_ADVANCE * upem, max_advance=upem)
 
     # --- Latin / symbols: cap-height fit, baseline + proportional advances -------------
-    lat_scale, lat_sb = lat_fit['scale'], lat_fit['side_bearing']
+    lat_scale = lat_fit['scale']
     cap_top = lat_fit['cap_height']
     mid_line = cap_top // 2
     x_line = lat_fit.get('x_height') or round(0.55 * cap_top)
+    placed = []
     for name in latin_names:
         glyph = glyf[name]
         cp = cp_of[name]
         if glyph.numberOfContours <= 0:                 # space / empty
             _, lsb = hmtx[name]
-            hmtx[name] = (SPACE_ADVANCE, lsb)
+            hmtx[name] = (word_space, lsb)
             continue
 
         _shift(glyph, dx=0, dy=0, scale=lat_scale)
         glyph.recalcBounds(glyf)
-        ink_w = glyph.xMax - glyph.xMin
 
-        # horizontal: move ink to start at the side bearing; advance = ink + both bearings
-        dx = lat_sb - glyph.xMin
         if cp in TOP_ALIGNED:
             # Quotes, the degree sign and the caret hang near the cap-height top.
             dy = cap_top - glyph.yMax
@@ -546,11 +611,31 @@ def refine_metrics(ttf_path, out_path=None, fit=None):
         else:
             dy = -glyph.yMin          # rest on the baseline
 
-        _shift(glyph, dx, dy)
+        _shift(glyph, 0, dy)
         glyph.recalcBounds(glyf)
-        hmtx[name] = (max(1, round(ink_w + 2 * lat_sb)), lat_sb)
+        placed.append(name)
 
-    _ensure_space_glyphs(font, SPACE_ADVANCE)
+    # Horizontal: each kind of mark is measured in its own band (lowercase between the
+    # baseline and the x-line, everything else up to the cap height), then given its
+    # category's mean bearing, spread by the white each glyph brings.
+    glyphset = font.getGlyphSet()
+    depth = spacing.LATIN_DEPTH * x_line
+    by_kind = {}
+    for name in placed:
+        by_kind.setdefault(_latin_kind(cp_of[name]), []).append(name)
+    for kind, names in by_kind.items():
+        band = (0, x_line if kind == 'lower' else cap_top)
+        mean = tuple(r * cap_top for r in LATIN_BEARINGS[kind])
+        whites = {n: w for n in names
+                  if (w := spacing.white(glyphset, n, band, depth)) is not None}
+        found = spacing.bearings(whites, mean, spacing.LATIN_GIVE_BACK)
+        for name in names:
+            glyph = glyf[name]
+            lsb, rsb = found.get(name, mean)
+            lsb, rsb = _clamp_bearing(lsb, mean[0]), _clamp_bearing(rsb, mean[1])
+            _seat(glyph, glyf, hmtx, name, lsb, glyph.xMax - glyph.xMin, rsb)
+
+    _ensure_space_glyphs(font, word_space)
     try:
         _add_derived_glyphs(font, upem, x_line)
     except Exception as e:
@@ -562,8 +647,9 @@ def refine_metrics(ttf_path, out_path=None, fit=None):
     font.save(out_path)
     print(
         f"[metrics] refined -> {out_path} "
-        f"(hangul scale={kor_scale:.3f}/sb={kor_sb}, "
-        f"latin scale={lat_scale:.3f}/sb={lat_sb}, specks removed={specks})"
+        f"(hangul scale={kor_scale:.3f}/sb~{kor_sb}, "
+        f"latin scale={lat_scale:.3f}, optical bearings, space={word_space}, "
+        f"specks removed={specks})"
     )
     return out_path
 
