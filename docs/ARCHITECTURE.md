@@ -31,12 +31,15 @@ gone.
 | 2 | page to cells | `foundry/crop.py` (subprocess) | `cropped/` trimmed to the mark, `framed/` keeping cell framing |
 | 3 | ink/paper split | `clean_images` | `cleaned/`, 128×128 |
 | 4 | cells to characters | `char_layout.split_cells` | 33 style refs, then Latin/digits/punctuation |
-| 5 | generate Hangul | `foundry/inference.py` | `workdir/glyphs/user_<id>/inferred_<CP>.png` |
-| 6 | Latin bypass | `copy_traced_glyphs` | same directory, from the 512 px framed crops |
-| 7 | raster cleanup | `prepare_trace_images` | `workdir/fonts/<id>/trace_regular/` |
-| 8 | trace | `glyph_vectorizer.build_ttf` | `media/ttf_files/user_font_<id>.ttf` |
-| 9 | metrics | `refine_metrics` | rewrites that file |
-| 10 | names, OS/2 | `set_font_metadata.apply_metadata` | rewrites that file |
+| 5 | one frame per sheet | `write_references` → `hand.frame_sheet` | `references/`, 128×128 |
+| 6 | generate Hangul | `foundry/generate.py` | `workdir/glyphs/user_<id>/inferred_<CP>.png` |
+| 7 | match the pen | `match_pen` → `hand.pen_correction` | generated syllables redrawn at 256 px |
+| 8 | the writer's own syllables | `embed_written_syllables` | the 33 style cells, 512 px, over the model's |
+| 9 | Latin bypass | `copy_traced_glyphs` | same directory, from the 512 px framed crops |
+| 10 | raster cleanup | `prepare_trace_images` | `workdir/fonts/<id>/trace_regular/` |
+| 11 | trace | `glyph_vectorizer.build_ttf` | `media/ttf_files/user_font_<id>.ttf` |
+| 12 | metrics | `refine_metrics` | rewrites that file |
+| 13 | names, OS/2 | `set_font_metadata.apply_metadata` | rewrites that file |
 
 `char_layout.py` is the single definition of which cell holds which character: 10×13 on one
 page, cells 0–27 the Korean style references, the rest `EXTRA_CHARS` — the whole of printable
@@ -44,6 +47,13 @@ ASCII plus ₩, ※ and °. It also owns the fractions `crop.py` trims off each 
 much is trimmed and how far down the guide glyph is printed are two halves of one decision. Change the printed template
 and this file changes with it. Cell count and blank style cells are validated before
 inference, so a bad upload is an error on the page rather than a garbage font.
+
+The model reads the 33 Korean cells in one frame shared by the whole sheet, the way its
+training fonts were rendered, rather than each mark blown up to fill its own; then its
+output is thinned to the writer's measured pen, and the 33 syllables the writer actually
+wrote replace the model's versions of them. `foundry/hand.py` holds both decisions and the
+measurements behind them, and `scripts/eval_generation.py` reruns those measurements
+against 14 OFL handwriting fonts whose every glyph is known.
 
 Inference is DM-Font's `MACore` in two stages: encode the 33 style images into component
 memory, decode each target syllable out of it. Targets are filtered to `[가-힣]` — the model
@@ -63,7 +73,7 @@ stroke width or to the 1000-unit em, never to the frame. The reasoning is in tho
 
 ```text
 uploads/user_<id>.pdf         the uploaded template
-workdir/crops/user_<id>/      page rasters, cropped/, framed/, cleaned/
+workdir/crops/user_<id>/      page rasters, cropped/, framed/, cleaned/, references/
 workdir/configs/<name>.yaml   the generated inference config
 workdir/glyphs/user_<id>/     model output + traced Latin
 workdir/fonts/<id>/           trace_regular/, trace_light/, trace_bold/, glyph_fit.json

@@ -16,6 +16,7 @@ from foundry.char_layout import (
     TEMPLATE_LAYOUT_VERSION,
     split_cells,
 )
+from foundry.hand import frame_sheet, pen_correction
 
 # --- Korean style reference characters, in the same order as the template cells ---
 STYLE_CHARS = KOR_STYLE_CHARS
@@ -140,6 +141,18 @@ def _offset_outline(gray, delta_px):
     if abs(delta_px) < 1e-3:
         return np.asarray(gray, dtype=np.uint8)
     return _render_field(_signed_distance(np.asarray(gray) < 128) + float(delta_px))
+
+
+def repen(img, delta):
+    """Move every edge of a glyph raster by `delta` (a share of the frame; + thickens).
+
+    Model output is first enlarged to trace resolution, the size prepare_trace_images would
+    take it to anyway, so an offset of a fraction of a model pixel is not rounded away.
+    """
+    img = img.convert('L')
+    if img.width < TRACE_IMAGE_SIZE:
+        img = img.resize((TRACE_IMAGE_SIZE, TRACE_IMAGE_SIZE), Image.Resampling.LANCZOS)
+    return Image.fromarray(_offset_outline(np.asarray(img), -delta * img.width))
 
 
 def _mean_stroke_px(mask):
@@ -561,6 +574,8 @@ class FontStyleProcessor:
         # Same cells, kept in their original framing instead of trimmed to each mark.
         self.framed_dir = os.path.join(self.output_dir, "framed")
         self.cleaned_dir = os.path.join(self.output_dir, "cleaned")
+        # The Korean cells as the model reads them: one frame for the whole sheet.
+        self.references_dir = os.path.join(self.output_dir, "references")
         self.yaml_path = os.path.join(WORKDIR, "configs", f"{self.base_name}.yaml")
         self.checkpoint = os.path.join(PROJECT_ROOT, "checkpoints", "korean-handwriting.pth")
         self.save_dir = os.path.join(WORKDIR, "glyphs", self.base_name)
@@ -571,7 +586,8 @@ class FontStyleProcessor:
 
     def reset_intermediates(self):
         """Drop stale generated files that can outlive a template layout change."""
-        for dirname in (self.cropped_dir, self.framed_dir, self.cleaned_dir, self.save_dir):
+        for dirname in (self.cropped_dir, self.framed_dir, self.cleaned_dir,
+                        self.references_dir, self.save_dir):
             if os.path.isdir(dirname):
                 shutil.rmtree(dirname)
 
@@ -698,15 +714,32 @@ class FontStyleProcessor:
 
         return cleaned_paths
 
-    def generate_yaml(self, target_chars):
-        # Only the first 33 cells are Korean style references for the model; any extra
-        # cells are English/special glyphs handled by copy_traced_glyphs().
+    def _framed_style_cells(self):
+        """The Korean style cells, from crop.py's framed/ crops, in template order."""
         cleaned_paths = self._validated_cleaned_paths()
         style_imgs, _ = split_cells(cleaned_paths)
         if len(style_imgs) != len(STYLE_CHARS):
             raise ValueError(
                 f"Expected {len(STYLE_CHARS)} Korean style images, got {len(style_imgs)}"
             )
+        names = [os.path.basename(p) for p in style_imgs]
+        return names, [Image.open(os.path.join(self.framed_dir, n)) for n in names]
+
+    def write_references(self):
+        """Frame the Korean cells for the model, one frame for the sheet (see foundry.hand)."""
+        names, cells = self._framed_style_cells()
+        os.makedirs(self.references_dir, exist_ok=True)
+        paths = []
+        for name, img in zip(names, frame_sheet(cells, 128)):
+            paths.append(os.path.join(self.references_dir, name))
+            img.save(paths[-1])
+        return paths
+
+    def generate_yaml(self, target_chars):
+        # Only the first 33 cells are Korean style references for the model; any extra
+        # cells are English/special glyphs handled by copy_traced_glyphs().
+        cleaned_paths = self._validated_cleaned_paths()
+        style_imgs = self.write_references()
         cfg = {
             'template_layout_version': TEMPLATE_LAYOUT_VERSION,
             'template_cell_count': len(cleaned_paths),
@@ -747,6 +780,52 @@ class FontStyleProcessor:
         )
         print("[INFO] All Korean characters generated successfully.")
 
+    def _generated_paths(self):
+        """Model output for every syllable the writer did not write themselves."""
+        written = {f"inferred_{ord(c):04X}.png" for c in STYLE_CHARS}
+        return sorted(os.path.join(self.save_dir, f) for f in os.listdir(self.save_dir)
+                      if f.startswith("inferred_") and f.endswith(".png") and f not in written)
+
+    def match_pen(self, sample=300):
+        """Bring the generated syllables to the writer's own pen width (see foundry.hand).
+
+        The correction is a parallel offset of each outline, applied at trace resolution
+        so a fraction of a model pixel survives. Returns the edge offset as a share of the
+        frame.
+        """
+        generated = self._generated_paths()
+        if not generated:
+            return 0.0
+        step = max(1, len(generated) // sample)
+        written = [Image.open(os.path.join(self.references_dir, f))
+                   for f in sorted(os.listdir(self.references_dir))]
+        delta = pen_correction(written, [Image.open(p) for p in generated[::step]])
+        print(f"[INFO] Pen match: moving generated edges by {delta * 1000:+.1f}/1000 of the frame")
+        # Below a fiftieth of a model pixel the redraw would change nothing but the bytes.
+        if abs(delta) < 0.02 / 128:
+            return delta
+
+        def adjust(path):
+            repen(Image.open(path), delta).save(path)
+
+        with ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 1))) as pool:
+            list(pool.map(adjust, generated))
+        return delta
+
+    def embed_written_syllables(self):
+        """Put the writer's own Korean cells into the font in place of the model's versions.
+
+        They are the ground truth for those syllables, and several are among the commonest
+        in the language (의, 예, 값, 왕). Framed exactly as the model's references were, at
+        the 512 px crop resolution: on all six real sheets checked, the model reproduces its
+        references within 2% of their size and 2 px (of 128) of their position, so they sit
+        among the generated syllables without a jump.
+        """
+        names, cells = self._framed_style_cells()
+        for char, img in zip(STYLE_CHARS, frame_sheet(cells, 512)):
+            img.save(os.path.join(self.save_dir, f"inferred_{ord(char):04X}.png"))
+        print(f"[INFO] Embedded the writer's own {len(names)} Korean syllables")
+
     def copy_traced_glyphs(self):
         """Embed English/special glyphs by tracing the user's own handwriting.
 
@@ -781,4 +860,6 @@ class FontStyleProcessor:
         self.trim_and_save_images()
         self.clean_images()
         self.run_inference(progress=progress)
+        self.match_pen()
+        self.embed_written_syllables()
         self.copy_traced_glyphs()

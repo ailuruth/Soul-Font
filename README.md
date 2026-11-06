@@ -96,8 +96,8 @@ Windows SmartScreen's until they are signed and notarized.
 ## How it works
 
 ```text
-crop the template -> generate Hangul (DM-Font) -> clean the rasters
-                  -> trace to Béziers -> fit metrics -> write the TTF
+crop the template -> frame the sheet -> generate Hangul (DM-Font) -> match the pen
+                  -> clean the rasters -> trace to Béziers -> fit metrics -> write the TTF
 ```
 
 `soulfont/foundry/` holds that pipeline, one file per step and in that order;
@@ -107,6 +107,11 @@ layout. Two knobs are
 worth knowing: `SOUL_FONT_DEVICE=cpu` forces CPU inference and makes runs byte-reproducible,
 and `SOULFONT_STROKE_EVENNESS` (default `0.6`, `0` to disable) controls how much the model's
 uneven stroke width is smoothed out.
+
+`scripts/eval_generation.py --fetch` measures how faithfully the model continues a hand. It
+plays 14 OFL handwriting fonts as writers, generates 200 syllables each from their 33
+template cells, and scores the result against the fonts' own glyphs. Run it before and
+after any change to how references are prepared or output is post-processed.
 
 ## Troubleshooting
 
