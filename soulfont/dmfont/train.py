@@ -293,7 +293,7 @@ def main():
     )
     gen.cuda()
     # The custom weight initialiser that ran here (and on disc/aux_clf below) was
-    # FUNIT's, CC BY-NC-SA 4.0, and was removed when Soul Font went commercial.
+    # FUNIT's, CC BY-NC-SA 4.0, which an MIT project cannot carry, so it was removed.
     # PyTorch's default initialisation now applies, so training from scratch will
     # not reproduce the published checkpoint.
 

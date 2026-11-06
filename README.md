@@ -118,16 +118,7 @@ Defaults are for local development: SQLite, `DEBUG = True`, and no password vali
 
 ## Licence
 
-Soul Font is **source-available, not open source**. The code is licensed under
-[PolyForm Noncommercial 1.0.0](LICENSE): read it, run it, modify it and share it
-for any noncommercial purpose — personal projects, study, research, teaching. What
-it does not grant is commercial use, which is reserved. For a commercial licence,
-write to nobel2040ne@gmail.com.
+Soul Font is open source under the [MIT License](LICENSE).
 
-Earlier releases were MIT. That grant is not revoked: any commit up to and
-including `865d66d` remains available under MIT to anyone who obtained it then.
-The licence change applies from this commit forward.
-
-What this licence does not cover: the **third-party components** — DM-Font, system.css,
-Galmuri, the Python dependencies — keep their own terms, recorded in their per-file
-copyright headers.
+The third-party components (DM-Font, system.css, Galmuri, the Python dependencies) keep
+their own terms, recorded in their per-file copyright headers.

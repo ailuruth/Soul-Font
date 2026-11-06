@@ -15,8 +15,8 @@ def split_dim(x, dim, n_chunks):
 #
 # Upstream DM-Font adopted it from NVlabs/FUNIT, which is licensed CC BY-NC-SA 4.0
 # and so forbids commercial use — the one carve-out from DM-Font's own MIT grant.
-# Soul Font is now sold, so it cannot ship. It was reachable only from
-# dmfont/train.py; inference never touched it. Do not restore it from upstream.
+# Soul Font is MIT, which that term would contradict, so it cannot ship. It was
+# reachable only from dmfont/train.py; inference never touched it. Do not restore it from upstream.
 
 
 def spectral_norm(module):
